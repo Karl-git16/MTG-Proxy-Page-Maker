@@ -50,6 +50,7 @@ interface DeckCard {
   currentFaceIndex?: number; // For double-faced cards
   // Manual card options
   addBlackBorder?: boolean; // Whether to add black border on export
+  addBlackBorderBack?: boolean; // Whether to add black border on back face
   isDoubleSided?: boolean; // Whether this is marked as double-sided
   backFaceName?: string; // Name of the back face for double-sided cards
   customImage?: string; // Base64 data URL of uploaded image
@@ -458,6 +459,41 @@ const ScryfallCardDisplay: React.FC = () => {
     const cardsPerPage = maxCardsPerSheet;
     const totalPages = Math.ceil(cards.length / cardsPerPage);
     
+    // Helper function to compress canvas to under 25MB
+    const compressCanvas = async (canvas: HTMLCanvasElement, baseName: string): Promise<void> => {
+      const maxSizeBytes = 25 * 1024 * 1024; // 25MB
+      let quality = 0.9;
+      let blob: Blob | null = null;
+      
+      // Try progressively lower quality until under 25MB
+      while (quality > 0.1) {
+        blob = await new Promise<Blob | null>((resolve) => {
+          canvas.toBlob((b) => resolve(b), 'image/jpeg', quality);
+        });
+        
+        if (blob && blob.size <= maxSizeBytes) {
+          break;
+        }
+        
+        const currentSizeMB = (blob?.size || 0) / (1024 * 1024);
+        console.log(`${baseName}: ${currentSizeMB.toFixed(2)}MB at quality ${quality.toFixed(2)}, compressing further...`);
+        quality -= 0.1;
+      }
+      
+      if (blob) {
+        const finalSizeMB = blob.size / (1024 * 1024);
+        console.log(`${baseName}: Final size ${finalSizeMB.toFixed(2)}MB at quality ${quality.toFixed(2)}`);
+        
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = baseName;
+        link.click();
+        URL.revokeObjectURL(url);
+        console.log(`✅ ${baseName} created successfully`);
+      }
+    };
+    
     for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
       const startIndex = pageIndex * cardsPerPage;
       const endIndex = Math.min(startIndex + cardsPerPage, cards.length);
@@ -570,19 +606,8 @@ const ScryfallCardDisplay: React.FC = () => {
       });
       
       await Promise.all(frontImagePromises);
-      
-      // Download front sheet
-      frontCanvas.toBlob((blob) => {
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `Sheet${pageIndex + 1}_Front.jpg`;
-          link.click();
-          URL.revokeObjectURL(url);
-          console.log(`✅ Sheet${pageIndex + 1}_Front.jpg created successfully`);
-        }
-      }, 'image/jpeg', 0.9);
+
+      await compressCanvas(frontCanvas, `Sheet${pageIndex + 1}_Front.jpg`);
       
       await new Promise(resolve => setTimeout(resolve, 500));
       
@@ -607,234 +632,177 @@ const ScryfallCardDisplay: React.FC = () => {
         const col = index % 3;
         const reversedCol = 2 - col; // Reverse column: 0->2, 1->1, 2->0
         const reversedIndex = row * 3 + reversedCol;
-        
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
+        const box = gridBoxes[reversedIndex]; // Use reversed position
         
         return new Promise<void>((resolve) => {
-          img.onload = () => {
-            const box = gridBoxes[reversedIndex]; // Use reversed position
-            const shouldAddBorder = card.addBlackBorder !== undefined ? card.addBlackBorder : true;
-            
-            if (shouldAddBorder) {
-              const borderSize = 37.5;
-              const cardWidth = (box.x1 - box.x0) - (2 * borderSize);
-              const cardHeight = (box.y1 - box.y0) - (2 * borderSize);
-              const fullWidth = box.x1 - box.x0;
-              const fullHeight = box.y1 - box.y0;
-              
-              backCtx.save();
-              backCtx.translate(box.x0 + fullWidth/2, box.y0 + fullHeight/2);
-              backCtx.rotate(Math.PI / 2);
-              backCtx.rotate(Math.PI);
-              
-              backCtx.fillStyle = 'black';
-              backCtx.fillRect(-fullHeight/2, -fullWidth/2, fullHeight, fullWidth);
-              backCtx.drawImage(img, -cardHeight/2, -cardWidth/2, cardHeight, cardWidth);
-              
-              // Rounded corners
-              backCtx.fillStyle = 'black';
-              const cornerRadius = 46;
-              const maskOffset = 1;
-              const expandedRadius = cornerRadius + maskOffset;
-
-              backCtx.beginPath();
-              backCtx.arc(-cardHeight/2 + cornerRadius - maskOffset, -cardWidth/2 + cornerRadius - maskOffset, expandedRadius, Math.PI, 3*Math.PI/2);
-              backCtx.lineTo(-cardHeight/2 - maskOffset, -cardWidth/2 - maskOffset);
-              backCtx.closePath();
-              backCtx.fill();
-
-              backCtx.beginPath();
-              backCtx.arc(cardHeight/2 - cornerRadius + maskOffset, -cardWidth/2 + cornerRadius - maskOffset, expandedRadius, 3*Math.PI/2, 2*Math.PI);
-              backCtx.lineTo(cardHeight/2 + maskOffset, -cardWidth/2 - maskOffset);
-              backCtx.closePath();
-              backCtx.fill();
-
-              backCtx.beginPath();
-              backCtx.arc(-cardHeight/2 + cornerRadius - maskOffset, cardWidth/2 - cornerRadius + maskOffset, expandedRadius, Math.PI/2, Math.PI);
-              backCtx.lineTo(-cardHeight/2 - maskOffset, cardWidth/2 + maskOffset);
-              backCtx.closePath();
-              backCtx.fill();
-
-              backCtx.beginPath();
-              backCtx.arc(cardHeight/2 - cornerRadius + maskOffset, cardWidth/2 - cornerRadius + maskOffset, expandedRadius, 0, Math.PI/2);
-              backCtx.lineTo(cardHeight/2 + maskOffset, cardWidth/2 + maskOffset);
-              backCtx.closePath();
-              backCtx.fill();
-              
-              backCtx.restore();
-            } else {
-              const fullWidth = box.x1 - box.x0;
-              const fullHeight = box.y1 - box.y0;
-              
-              backCtx.save();
-              backCtx.translate(box.x0 + fullWidth/2, box.y0 + fullHeight/2);
-              backCtx.rotate(Math.PI / 2);
-              backCtx.drawImage(img, -fullHeight/2, -fullWidth/2, fullHeight, fullWidth);
-              backCtx.restore();
-            }
-            
-            console.log(`Sheet${pageIndex + 1} Back: Inserted ${card.name} back`);
-            resolve();
-          };
-          
-          img.onerror = () => {
-            console.error(`Failed to load back image for ${card.name}`);
-            resolve();
-          };
-          
           // Determine back image
-          let imageUrl: string | undefined;
-          
-          // Check if it's a double-sided card
           const isDoubleSidedCard = (card.cardData && isDoubleSided(card.cardData)) || 
                                     (card.isCustomCard && card.isDoubleSided && card.customBackImage);
           
           if (isDoubleSidedCard) {
-            // Use the back face image
+            // Use the back face image for double-sided cards
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            
+            img.onload = () => {
+              const shouldAddBorder = card.addBlackBorder !== undefined ? card.addBlackBorder : true;
+              
+              if (shouldAddBorder) {
+                const borderSize = 37.5;
+                const cardWidth = (box.x1 - box.x0) - (2 * borderSize);
+                const cardHeight = (box.y1 - box.y0) - (2 * borderSize);
+                const fullWidth = box.x1 - box.x0;
+                const fullHeight = box.y1 - box.y0;
+                
+                backCtx.save();
+                backCtx.translate(box.x0 + fullWidth/2, box.y0 + fullHeight/2);
+                backCtx.rotate(Math.PI / 2);
+                backCtx.rotate(Math.PI);
+                
+                backCtx.fillStyle = 'black';
+                backCtx.fillRect(-fullHeight/2, -fullWidth/2, fullHeight, fullWidth);
+                backCtx.drawImage(img, -cardHeight/2, -cardWidth/2, cardHeight, cardWidth);
+                
+                // Rounded corners
+                backCtx.fillStyle = 'black';
+                const cornerRadius = 46;
+                const maskOffset = 1;
+                const expandedRadius = cornerRadius + maskOffset;
+
+                backCtx.beginPath();
+                backCtx.arc(-cardHeight/2 + cornerRadius - maskOffset, -cardWidth/2 + cornerRadius - maskOffset, expandedRadius, Math.PI, 3*Math.PI/2);
+                backCtx.lineTo(-cardHeight/2 - maskOffset, -cardWidth/2 - maskOffset);
+                backCtx.closePath();
+                backCtx.fill();
+
+                backCtx.beginPath();
+                backCtx.arc(cardHeight/2 - cornerRadius + maskOffset, -cardWidth/2 + cornerRadius - maskOffset, expandedRadius, 3*Math.PI/2, 2*Math.PI);
+                backCtx.lineTo(cardHeight/2 + maskOffset, -cardWidth/2 - maskOffset);
+                backCtx.closePath();
+                backCtx.fill();
+
+                backCtx.beginPath();
+                backCtx.arc(-cardHeight/2 + cornerRadius - maskOffset, cardWidth/2 - cornerRadius + maskOffset, expandedRadius, Math.PI/2, Math.PI);
+                backCtx.lineTo(-cardHeight/2 - maskOffset, cardWidth/2 + maskOffset);
+                backCtx.closePath();
+                backCtx.fill();
+
+                backCtx.beginPath();
+                backCtx.arc(cardHeight/2 - cornerRadius + maskOffset, cardWidth/2 - cornerRadius + maskOffset, expandedRadius, 0, Math.PI/2);
+                backCtx.lineTo(cardHeight/2 + maskOffset, cardWidth/2 + maskOffset);
+                backCtx.closePath();
+                backCtx.fill();
+                
+                backCtx.restore();
+              } else {
+                const fullWidth = box.x1 - box.x0;
+                const fullHeight = box.y1 - box.y0;
+                
+                backCtx.save();
+                backCtx.translate(box.x0 + fullWidth/2, box.y0 + fullHeight/2);
+                backCtx.rotate(Math.PI / 2);
+                backCtx.drawImage(img, -fullHeight/2, -fullWidth/2, fullHeight, fullWidth);
+                backCtx.restore();
+              }
+              
+              console.log(`Sheet${pageIndex + 1} Back: Inserted ${card.name} back`);
+              resolve();
+            };
+            
+            img.onerror = () => {
+              console.error(`Failed to load back image for ${card.name}`);
+              resolve();
+            };
+            
+            let imageUrl: string | undefined;
             if (card.customBackImage) {
               imageUrl = card.customBackImage;
             } else if (card.cardData) {
               imageUrl = getCardImage(card.cardData, 1); // Face 1 = back
             }
-          } else {
-            // For single-sided cards, use universal back if available, otherwise draw black with oval
-            const box = gridBoxes[index];
             
-            if (universalBackImage) {
-              // Use the universal back image
-              const img = new Image();
-              img.crossOrigin = 'anonymous';
-              
-              return new Promise<void>((resolve) => {
-                img.onload = () => {
-                  const shouldAddBorder = card.addBlackBorder !== undefined ? card.addBlackBorder : true;
-                  
-                  if (shouldAddBorder) {
-                    const borderSize = 37.5;
-                    const cardWidth = (box.x1 - box.x0) - (2 * borderSize);
-                    const cardHeight = (box.y1 - box.y0) - (2 * borderSize);
-                    const fullWidth = box.x1 - box.x0;
-                    const fullHeight = box.y1 - box.y0;
-                    
-                    backCtx.save();
-                    backCtx.translate(box.x0 + fullWidth/2, box.y0 + fullHeight/2);
-                    backCtx.rotate(Math.PI / 2);
-                    backCtx.rotate(Math.PI); // 180 degree rotation
-                    
-                    backCtx.fillStyle = 'black';
-                    backCtx.fillRect(-fullHeight/2, -fullWidth/2, fullHeight, fullWidth);
-                    backCtx.drawImage(img, -cardHeight/2, -cardWidth/2, cardHeight, cardWidth);
-                    
-                    // Add rounded corners (same as before)
-                    backCtx.fillStyle = 'black';
-                    const cornerRadius = 46;
-                    const maskOffset = 1;
-                    const expandedRadius = cornerRadius + maskOffset;
-
-                    backCtx.beginPath();
-                    backCtx.arc(-cardHeight/2 + cornerRadius - maskOffset, -cardWidth/2 + cornerRadius - maskOffset, expandedRadius, Math.PI, 3*Math.PI/2);
-                    backCtx.lineTo(-cardHeight/2 - maskOffset, -cardWidth/2 - maskOffset);
-                    backCtx.closePath();
-                    backCtx.fill();
-
-                    backCtx.beginPath();
-                    backCtx.arc(cardHeight/2 - cornerRadius + maskOffset, -cardWidth/2 + cornerRadius - maskOffset, expandedRadius, 3*Math.PI/2, 2*Math.PI);
-                    backCtx.lineTo(cardHeight/2 + maskOffset, -cardWidth/2 - maskOffset);
-                    backCtx.closePath();
-                    backCtx.fill();
-
-                    backCtx.beginPath();
-                    backCtx.arc(-cardHeight/2 + cornerRadius - maskOffset, cardWidth/2 - cornerRadius + maskOffset, expandedRadius, Math.PI/2, Math.PI);
-                    backCtx.lineTo(-cardHeight/2 - maskOffset, cardWidth/2 + maskOffset);
-                    backCtx.closePath();
-                    backCtx.fill();
-
-                    backCtx.beginPath();
-                    backCtx.arc(cardHeight/2 - cornerRadius + maskOffset, cardWidth/2 - cornerRadius + maskOffset, expandedRadius, 0, Math.PI/2);
-                    backCtx.lineTo(cardHeight/2 + maskOffset, cardWidth/2 + maskOffset);
-                    backCtx.closePath();
-                    backCtx.fill();
-                    
-                    backCtx.restore();
-                  } else {
-                    const fullWidth = box.x1 - box.x0;
-                    const fullHeight = box.y1 - box.y0;
-                    
-                    backCtx.save();
-                    backCtx.translate(box.x0 + fullWidth/2, box.y0 + fullHeight/2);
-                    backCtx.rotate(Math.PI / 2);
-                    backCtx.rotate(Math.PI); // 180 degree rotation
-                    backCtx.drawImage(img, -fullHeight/2, -fullWidth/2, fullHeight, fullWidth);
-                    backCtx.restore();
-                  }
-                  
-                  console.log(`Sheet${pageIndex + 1} Back: Universal back for ${card.name}`);
-                  resolve();
-                };
-                
-                img.onerror = () => {
-                  console.error(`Failed to load universal back image`);
-                  resolve();
-                };
-                
-                img.src = universalBackImage;
-              });
+            if (imageUrl) {
+              img.src = imageUrl;
             } else {
-              // Original black rectangle with oval and PROXY text
-              backCtx.save();
-              const fullWidth = box.x1 - box.x0;
-              const fullHeight = box.y1 - box.y0;
-              backCtx.translate(box.x0 + fullWidth/2, box.y0 + fullHeight/2);
-              backCtx.rotate(Math.PI / 2);
-              
-              backCtx.fillStyle = 'black';
-              backCtx.fillRect(-fullHeight/2, -fullWidth/2, fullHeight, fullWidth);
-              
-              backCtx.fillStyle = '#8B4513';
-              backCtx.beginPath();
-              backCtx.ellipse(0, 0, fullHeight * 0.35, fullWidth * 0.2, 0, 0, 2 * Math.PI);
-              backCtx.fill();
-              
-              backCtx.save();
-              backCtx.rotate(Math.PI);
-              backCtx.fillStyle = 'white';
-              backCtx.font = 'bold 80px Arial';
-              backCtx.textAlign = 'center';
-              backCtx.textBaseline = 'middle';
-              backCtx.fillText('PROXY', 0, 0);
-              backCtx.restore();
-              
-              backCtx.restore();
-              
-              console.log(`Sheet${pageIndex + 1} Back: Black card back with oval and PROXY text for ${card.name}`);
+              console.warn(`No back image URL found for ${card.name}`);
               resolve();
             }
-          }
-
-          if (imageUrl) {
-            img.src = imageUrl;
           } else {
-            console.warn(`No back image URL found for ${card.name}`);
-            resolve();
+            // For single-sided cards, use universal back if available, otherwise draw default back
+            if (universalBackImage) {
+              const backImg = new Image();
+              backImg.crossOrigin = 'anonymous';
+              backImg.src = universalBackImage;
+
+              backImg.onload = () => {
+                const shouldAddBorder = card.addBlackBorderBack !== undefined ? card.addBlackBorderBack : true;
+                
+                if (shouldAddBorder) {
+                  const borderSize = 37.5;
+                  const cardWidth = (box.x1 - box.x0) - (2 * borderSize);
+                  const cardHeight = (box.y1 - box.y0) - (2 * borderSize);
+                  const fullWidth = box.x1 - box.x0;
+                  const fullHeight = box.y1 - box.y0;
+
+                  backCtx.save();
+                  backCtx.translate(box.x0 + fullWidth / 2, box.y0 + fullHeight / 2);
+                  backCtx.rotate(Math.PI / 2);
+                  backCtx.rotate(Math.PI);
+                  backCtx.fillStyle = 'black';
+                  backCtx.fillRect(-fullHeight / 2, -fullWidth / 2, fullHeight, fullWidth);
+                  backCtx.drawImage(backImg, -cardHeight / 2, -cardWidth / 2, cardHeight, cardWidth);
+                  backCtx.restore();
+                } else {
+                  const fullWidth = box.x1 - box.x0;
+                  const fullHeight = box.y1 - box.y0;
+                  backCtx.save();
+                  backCtx.translate(box.x0 + fullWidth / 2, box.y0 + fullHeight / 2);
+                  backCtx.rotate(Math.PI / 2);
+                  backCtx.rotate(Math.PI);
+                  backCtx.drawImage(backImg, -fullHeight / 2, -fullWidth / 2, fullHeight, fullWidth);
+                  backCtx.restore();
+                }
+
+                console.log(`Sheet${pageIndex + 1} Back: Universal back for ${card.name}`);
+                resolve();
+              };
+
+              backImg.onerror = () => {
+                console.error(`Failed to load universal back image`);
+                resolve();
+              };
+            } else {
+              const defaultImg = new Image();
+              defaultImg.crossOrigin = 'anonymous';
+              defaultImg.src = '/defaultBack.png';
+
+              defaultImg.onload = () => {
+                const fullWidth = box.x1 - box.x0;
+                const fullHeight = box.y1 - box.y0;
+
+                backCtx.save();
+                backCtx.translate(box.x0 + fullWidth / 2, box.y0 + fullHeight / 2);
+                backCtx.rotate(Math.PI / 2);
+                backCtx.rotate(Math.PI);
+                backCtx.drawImage(defaultImg, -fullHeight / 2, -fullWidth / 2, fullHeight, fullWidth);
+                backCtx.restore();
+
+                console.log(`Sheet${pageIndex + 1} Back: Default stored back for ${card.name}`);
+                resolve();
+              };
+
+              defaultImg.onerror = () => {
+                console.error(`Failed to load default back image`);
+                resolve();
+              };
+            }
           }
         });
       });
       
       await Promise.all(backImagePromises);
       
-      // Download back sheet
-      backCanvas.toBlob((blob) => {
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `Sheet${pageIndex + 1}_Back.jpg`;
-          link.click();
-          URL.revokeObjectURL(url);
-          console.log(`✅ Sheet${pageIndex + 1}_Back.jpg created successfully`);
-        }
-      }, 'image/jpeg', 0.9);
+      await compressCanvas(backCanvas, `Sheet${pageIndex + 1}_Back.jpg`);
       
       await new Promise(resolve => setTimeout(resolve, 500));
     }
@@ -2280,7 +2248,27 @@ const ScryfallCardDisplay: React.FC = () => {
                 }
               }}
             >
+              
               <div style={{ fontSize: '64px', marginBottom: '12px', color: '#9ca3af' }}></div>
+              <input
+                    type="checkbox"
+                    id="blackBorder"
+                    checked={newCardForm.addBlackBorder}
+                    onChange={(e) => handleFormChange('addBlackBorderBack', e.target.checked)}
+                    style={{
+                      marginRight: '8px',
+                      width: '16px',
+                      height: '16px',
+                      cursor: 'pointer'
+                    }}
+                  />
+                  <label htmlFor="blackBorder" style={{
+                    color: 'white',
+                    fontSize: '14px',
+                    cursor: 'pointer'
+                  }}>
+                    Add black border when exporting
+                  </label>
               <p style={{ 
                 color: '#d1d5db', 
                 fontSize: '13px', 
