@@ -774,7 +774,7 @@ const ScryfallCardDisplay: React.FC = () => {
             } else {
               const defaultImg = new Image();
               defaultImg.crossOrigin = 'anonymous';
-              defaultImg.src = '/defaultBack.png';
+              defaultImg.src = '/defaultBack.jpg';
 
               defaultImg.onload = () => {
                 const fullWidth = box.x1 - box.x0;
